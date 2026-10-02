@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: Notification Service API
+  description: |
+    Notification Microservice – consumes `ORDER_COMPLETED` events from
+    the Kafka `order-events` topic and creates order confirmation
+    notifications. Provides REST endpoints to query notification history.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3004
+    description: Direct service access
+  - url: http://localhost:3000
+    description: Via API Gateway
+tags:
+  - name: Health
+    description: Service health check
+  - name: Notifications
+    description: Notification query endpoints
+
+components:
+  schemas:
+    Notification:
+      type: object
+      properties:
+        _id:
+          type: string
+        orderId:
+          type: string
+          example: 667a1b2c3d4e5f6a7b8c9d0e
+        recipient:
+          type: string
+          example: user@cakedelight.com
+        type:
+          type: string
+          example: ORDER_CONFIRMATION
+        status:
+          type: string
+          example: SENT
+        message:
+          type: string
+          example: "Your Cake Delight order 667a... is confirmed! Total: $64"
+        sentAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns service status and the last Kafka event received.
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    example: notification-service
+                  status:
+                    type: string
+                    example: ok
+                  lastEvent:
+                    type: object
+                    nullable: true
+                    description: Last Kafka event processed (null if none)
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: List all notifications
+      description: Returns the latest 100 notifications, newest first.
+      responses:
+        "200":
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /api/notifications/{orderId}:
+    get:
+      tags: [Notifications]
+      summary: Get notifications for a specific order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Order ID to look up notifications for
+      responses:
+        "200":
+          description: Notifications for the order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+        "404":
+          description: No notifications found for this order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
