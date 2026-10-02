@@ -129,63 +129,47 @@ async function start() {
   await mongoose.connect(process.env.MONGO_URI);
   logger.info('Connected to MongoDB');
 
-  // Connect Kafka consumer with retry
-  await consumer.connect();
-  logger.info('Kafka consumer connected');
-
-  // Retry subscribe – topic may not exist yet if no orders have been placed
-  let subscribed = false;
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      await consumer.subscribe({ topic: TOPIC, fromBeginning: false });
-      subscribed = true;
-      logger.info('Kafka consumer subscribed', { topic: TOPIC });
-      break;
-    } catch (err) {
-      logger.warn(`Subscribe attempt ${attempt}/10 failed: ${err.message}`);
-      if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
-    }
-  }
-
-  if (!subscribed) {
-    logger.warn('Could not subscribe to topic yet – starting HTTP server anyway. Will retry on next restart.');
-  }
-
-  // Process incoming messages (only runs if subscribed)
-  if (subscribed) {
-    await consumer.run({
-      eachMessage: async ({ topic, partition, message }) => {
-        try {
-          const event = JSON.parse(message.value.toString());
-          lastEvent = event;
-
-          logger.info('Received event', {
-            eventType: event.eventType,
-            orderId: event.data?.orderId,
-            topic,
-            partition,
-            offset: message.offset
-          });
-
-          if (event.eventType === 'ORDER_COMPLETED') {
-            await handleOrderEvent(event);
-          }
-        } catch (err) {
-          logger.error('Error processing Kafka message', {
-            error: err.message,
-            topic,
-            partition,
-            offset: message.offset
-          });
-        }
-      }
-    });
-  } catch (kErr) {
-    logger.warn('Kafka consumer connection failed (proceeding in standby): ' + kErr.message);
-  }
-
   const PORT = process.env.PORT || 3004;
   app.listen(PORT, () => logger.info(`notification-service ready on port ${PORT}`));
+
+  // Connect Kafka consumer in background
+  (async () => {
+    try {
+      await consumer.connect();
+      logger.info('Kafka consumer connected');
+
+      let subscribed = false;
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        try {
+          await consumer.subscribe({ topic: TOPIC, fromBeginning: false });
+          subscribed = true;
+          logger.info('Kafka consumer subscribed', { topic: TOPIC });
+          break;
+        } catch (err) {
+          logger.warn('Subscribe attempt failed: ' + err.message);
+          if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+
+      if (subscribed) {
+        await consumer.run({
+          eachMessage: async ({ topic, partition, message }) => {
+            try {
+              const event = JSON.parse(message.value.toString());
+              lastEvent = event;
+              if (event.eventType === 'ORDER_COMPLETED') {
+                await handleOrderEvent(event);
+              }
+            } catch (err) {
+              logger.error('Error processing Kafka message', { error: err.message });
+            }
+          }
+        });
+      }
+    } catch (kErr) {
+      logger.warn('Kafka consumer connection skipped: ' + kErr.message);
+    }
+  })();
 }
 
 start().catch((err) => {
