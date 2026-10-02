@@ -180,6 +180,8 @@ async function start() {
         }
       }
     });
+  } catch (kErr) {
+    logger.warn('Kafka consumer connection failed (proceeding in standby): ' + kErr.message);
   }
 
   const PORT = process.env.PORT || 3004;
